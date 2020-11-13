@@ -1,0 +1,147 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+"""In this module we get data for n-joints inverted pendulum"""
+
+import numpy as np
+import scipy.constants
+import math
+import matplotlib.pyplot as plt
+from numpy import linalg as LA
+
+def get_pendulum_dataset(m_arr, angle_arr, angled_arr, x_dot, l_arr, num_joints, time_step, num_steps):
+   
+    """This function actually provides us with the dataset.
+    
+    The function utilizes the notion of lagrangian and Euler's equations. All the cycles below
+    are needed for summation of parameters, which define coefficients of higher derivatives of coordinates.
+    
+    In the end we use least-squares for the purpose of finding solutions, since direct methods are relatively slow when 
+    condition numbers of the matrix are high.
+    
+    Arguments: m_arr: array of masses of platform and weights
+               angle_arr: initial angles between joints
+               angled_arr: initial first derivatives of angles
+               x_dot: initial velocity of the platform
+               l_arr: array of lenghts of joints
+               num_joints: number of joints
+               time_step: the parameter of time discretization
+               num_steps: number of computational steps
+               
+    Returns: matrix with rows representing the state of the system in different moments
+    """
+    g = scipy.constants.g
+    res_arr = []
+    
+    if(num_joints<=0):
+        print("error!")
+        return -1
+
+    
+    for counter in range(num_steps):
+        
+        print(counter)
+        
+        matr = []
+        vec = []
+        line = []
+        
+        #Get first row of the system. rhs stays for Right Hand Side, line represents the row of the matrix
+        
+        line.append(sum(m_arr))
+        
+        rhs = 0
+        
+        for i in range(num_joints):
+            line.append(l_arr[i]*math.cos(angle_arr[i])*sum(m_arr[i+1:num_joints+1]))
+            
+        for i in range(num_joints):
+            rhs = rhs + angled_arr[i]*angled_arr[i]*l_arr[i]*math.sin(angle_arr[i])*sum(m_arr[i+1: num_joints+1])
+        
+        vec.append(rhs)
+        matr.append(line)
+        
+        
+        #Get other rows
+        
+        for p in range(num_joints):
+            
+            line = []
+            rhs = 0
+            
+            line.append(l_arr[p]*math.cos(angle_arr[p])*sum(m_arr[p+1: num_joints+1]))
+            
+            for i in range(num_joints):
+                
+                if(i==p):
+                    line.append(l_arr[p]*l_arr[p]*sum(m_arr[p+1: num_joints+1]))
+                else:
+                    line.append(2*l_arr[i]*l_arr[p]*math.cos(angle_arr[i]-angle_arr[p])*sum(m_arr[max(i, p)+1: num_joints+1]))
+            
+            for i in range(num_joints):
+                
+                rhs = rhs + 2*l_arr[i]*l_arr[p]*(angled_arr[i]-angled_arr[p])*angled_arr[i]*math.sin(angle_arr[i]-angle_arr[p])*sum(m_arr[max(i, p)+1: num_joints+1])
+                
+            rhs = rhs + x_dot*angled_arr[p]*l_arr[p]*math.sin(angle_arr[p])*sum(m_arr[p+1: num_joints+1])
+            
+            for i in range(num_joints):
+                rhs = rhs - angled_arr[i]*angled_arr[p]*l_arr[i]*l_arr[p]*math.sin(angle_arr[i]-angle_arr[p])*np.sign(p-i)*sum(m_arr[max(i, p)+1: num_joints+1])
+                
+            rhs = rhs - x_dot*angled_arr[p]*l_arr[p]*math.sin(angle_arr[p])*sum(m_arr[p+1:num_joints+1])
+            rhs = rhs + g*l_arr[p]*math.sin(angle_arr[p])*sum(m_arr[p+1:num_joints+1])
+            
+            matr.append(line)
+            vec.append(rhs)
+        
+        ddot_arr = LA.lstsq(matr, vec, rcond=None)[0]
+        
+        #Updating coordinates and velocities, using the definition of acceleration
+        
+        x_dot = x_dot + ddot_arr[0]*time_step
+        x = x_dot*time_step
+        
+        line = []
+        
+        line.append(x)
+        line.append(x_dot)
+        
+        for j in range(num_joints):
+            
+            angled_arr[j] = angled_arr[j] + ddot_arr[j+1]*time_step
+            angle_arr[j] = angle_arr[j] + angled_arr[j]*time_step                
+            line.append(angle_arr[j])
+            line.append(angled_arr[j])
+            
+        res_arr.append(line)
+                                                                           
+    return res_arr
+
+def example_use():
+    """This function provides us with an example of use."""
+    
+    m_arr = [1, 1, 1, 1, 1, 1]
+    angle_arr = [0.1, 0.1, -0.1, -0.1, 0]
+    angled_arr = [0, 0, 0, 0, 0]
+    x_dot = 0
+    l_arr = [1, 1, 1, 1, 1]
+    num_joints = 5
+    time_step = 0.001
+    num_steps = 10000
+ 
+    res = get_pendulum_dataset(m_arr, angle_arr, angled_arr, x_dot, l_arr, num_joints, time_step, num_steps)
+    
+    x = []
+    a1 = []
+    a2 = []
+    a3 = []
+
+    for i in range(num_steps):
+        x.append(res[i][0])
+        a1.append(res[i][1])
+        a2.append(res[i][2])
+        a3.append(res[i][3])
+        
+    plt.plot(x)
+    plt.plot(a1)
+    plt.plot(a2)
+    plt.plot(a3)
